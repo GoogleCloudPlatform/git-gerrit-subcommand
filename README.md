@@ -42,36 +42,37 @@ The purpose of creating this tool is to provide an extension to the `git` comman
 
 Download this repository and put the `git-gerrit` file in a directory in $PATH and give it executable permission, for example:
 
-    ```shell-script
-    install -m 755 git-gerrit /usr/local/bin
-    ```
+```shell-script
+install -m 755 git-gerrit /usr/local/bin
+```
 Run command `git gerrit help` to get a brief introduction of how to run this tool.
 
 ### Workflow
 
 The workflow of using `git-gerrit` at a glance:
 
-    1. Create a remote pointing to the gerrit repo, name it `gerrit`
+1. Create a remote pointing to the gerrit repo, name it `gerrit`
 
-        ```shell-script
-        git remote add gerrit the-url-to-gerrit-repo
-        ```
-    2. Adjust the `gerrit.remoteRef` config value to point to the right ref for reviewing
+```shell-script
+git remote add gerrit the-url-to-gerrit-repo
+```
+2. Adjust the `gerrit.remoteRef` config value to point to the right ref for reviewing
 
-        ```shell-script
-        git config add gerrit.remoteRef refs/for/main
-        ```
-    3. Start work by using `git gerrit start-work`
-    4. Do development and commit locally as usuall
-    5. Submit changes as a Change-List(CL) by using `git gerrit submit`
-    6. Wait the CL been reviewed
-    7. If needed, make more developments and commits
-    8. Submit CL again
+```shell-script
+git config add gerrit.remoteRef refs/for/main
+```
+
+3. Start work by using `git gerrit start-work`
+4. Do development and commit locally as usuall
+5. Submit changes as a Change-List(CL) by using `git gerrit submit`
+6. Wait the CL been reviewed
+7. If needed, make more developments and commits
+8. Submit CL again
 
 ### Config values
 
-    1. `gerrit.remoteName` the name of a git remote pointing to the gerrit repo, default to `gerrit`
-    2. `gerrit.remoteRef` the ref of which gerrit review submits to, defaut to `refs/for/main`
+1. `gerrit.remoteName` the name of a git remote pointing to the gerrit repo, default to `gerrit`
+2. `gerrit.remoteRef` the ref of which gerrit review submits to, defaut to `refs/for/main`
 
 ## Behind the scenes
 
