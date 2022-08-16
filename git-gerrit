@@ -85,9 +85,9 @@ submitwork() {
   if presubmitcheck "$ID"
   then
       git commit --trailer="" --trailer="#Input you commit message for submission above" --trailer="Change-Id: $ID"  --allow-empty
-      if git rev-list -n 1 main 2>/dev/null
+      if git rev-list -n 1 "${GERRIT_DEFAULTBRANCH}" 2>/dev/null
       then
-        git checkout main
+        git checkout "${GERRIT_DEFAULTBRANCH}"
         git checkout -b ${ID}.submit
         git merge --squash $ID
       else
