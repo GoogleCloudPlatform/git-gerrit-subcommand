@@ -55,7 +55,7 @@ The workflow of using `git-gerrit` at a glance:
 
 ```shell-script
 git remote add gerrit the-url-to-gerrit-repo
-git config --add gerrit.remote repo-name
+git config --add gerrit.remoteName gerrit
 git config --add gerrit.defaultBranch main
 ```
 
