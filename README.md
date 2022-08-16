@@ -55,11 +55,15 @@ The workflow of using `git-gerrit` at a glance:
 
 ```shell-script
 git remote add gerrit the-url-to-gerrit-repo
+git config --add gerrit.remote repo-name
+git config --add gerrit.defaultBranch main
 ```
+
+
 2. Adjust the `gerrit.remoteRef` config value to point to the right ref for reviewing
 
 ```shell-script
-git config add gerrit.remoteRef refs/for/main
+git config --add gerrit.remoteRef refs/for/main
 ```
 
 3. Start work by using `git gerrit start-work`
