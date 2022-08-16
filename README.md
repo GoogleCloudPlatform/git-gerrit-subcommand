@@ -51,27 +51,38 @@ Run command `git gerrit help` to get a brief introduction of how to run this too
 
 The workflow of using `git-gerrit` at a glance:
 
-1. Create a remote pointing to the gerrit repo, name it `gerrit`
+1.  Create a remote pointing to the gerrit repo, name it `gerrit`
 
-```shell-script
-git remote add gerrit the-url-to-gerrit-repo
-git config --add gerrit.remoteName gerrit
-git config --add gerrit.defaultBranch main
-```
+    1.  For existing local git repository
+    
+        ```shell-script
+        git remote add gerrit the-url-to-gerrit-repo
+        ```
+    1.  For new git clone
 
+        ```shell-script
+        git clone --origin gerrit the-url-to-gerrit-repo
+        ```
 
-2. Adjust the `gerrit.remoteRef` config value to point to the right ref for reviewing
+1.  Update the `git` configuration. (change into the git repo directory)
+
+    ```shell-script
+    git config --add gerrit.remoteName gerrit
+    git config --add gerrit.defaultBranch main
+    ```
+
+1.  Adjust the `gerrit.remoteRef` config value to point to the right ref for reviewing
 
 ```shell-script
 git config --add gerrit.remoteRef refs/for/main
 ```
 
-3. Start work by using `git gerrit start-work`
-4. Do development and commit locally as usuall
-5. Submit changes as a Change-List(CL) by using `git gerrit submit`
-6. Wait the CL been reviewed
-7. If needed, make more developments and commits
-8. Submit CL again
+1. Start work by using `git gerrit start-work`
+1. Do development and commit locally as usual
+1. Submit changes as a Change-List(CL) by using `git gerrit submit`
+1. Wait for the CL to be reviewed
+1. If needed, make more developments and commits and submit the changes by following the previous steps 
+1. Submit CL again
 
 ### Config values
 
