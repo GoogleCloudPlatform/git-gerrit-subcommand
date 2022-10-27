@@ -84,23 +84,29 @@ submitwork() {
   ID=$(git branch --show-current)
   if presubmitcheck "$ID"
   then
+    WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
+    if [ -z $WORKCOMMIT ]
+    then
       git commit --trailer="" --trailer="#Input you commit message for submission above" --trailer="Change-Id: $ID"  --allow-empty
-      if git rev-list -n 1 "${GERRIT_DEFAULTBRANCH}" 2>/dev/null
-      then
-        git checkout "${GERRIT_DEFAULTBRANCH}"
-        git checkout -b ${ID}.submit
-        git merge --squash $ID
-      else
-        git checkout --orphan ${ID}.submit
-      fi
-      if git commit -C $ID
-      then
-        git push "${GERRIT_REMOTE}" ${ID}.submit:"${GERRIT_REMOTEREF}"
-      fi
-      git checkout ${ID}
-      git branch -D ${ID}.submit
+    else
+      git commit -C "$WORKCOMMIT" --allow-empty
+    fi
+    if git rev-list -n 1 "${GERRIT_DEFAULTBRANCH}" 2>/dev/null
+    then
+      git checkout "${GERRIT_DEFAULTBRANCH}"
+      git checkout -b ${ID}.submit
+      git merge --squash $ID
+    else
+      git checkout --orphan ${ID}.submit
+    fi
+    if git commit -C $ID
+    then
+      git push "${GERRIT_REMOTE}" ${ID}.submit:"${GERRIT_REMOTEREF}"
+    fi
+    git checkout ${ID}
+    git branch -D ${ID}.submit
   fi
-  }
+}
 
 case ${1:-help} in
   start-work)
