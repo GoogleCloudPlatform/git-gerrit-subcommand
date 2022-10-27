@@ -67,18 +67,26 @@ presubmitcheck() {
   if ! (echo $ID|grep -q '^I[0-9a-f]\{40\}$')
   then
     echo "Not in gerrit working branch" >&2
-    exit 1
+    return 1
   fi
   if ! (output=$(git status --untracked-files=no --porcelain) && [ -z "$output" ])
   then
     echo "Workspace not clean, commit changes(or stash them) then submit" >&2
-    exit 1
+    return 1
   fi
   if git log --format=%B -n 1 HEAD|grep -q Change-Id
   then
     echo "Seems workspace has already been submitted" >&2
-    exit 1
+    return 1
   fi
+}
+resume_submitcheck() {
+  ID=$1
+  if ! (echo $ID|grep -q '^I[0-9a-f]\{40\}\.submit$')
+  then
+    return 1
+  fi
+  echo "Resume submitting..."
 }
 submitwork() {
   ID=$(git branch --show-current)
@@ -105,6 +113,11 @@ submitwork() {
     fi
     git checkout ${ID}
     git branch -D ${ID}.submit
+  elif resume_submitcheck "$ID"
+  then
+    git push "${GERRIT_REMOTE}" ${ID}:"${GERRIT_REMOTEREF}"
+    git checkout ${ID/.submit/}
+    git branch -D $ID
   fi
 }
 
