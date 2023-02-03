@@ -88,6 +88,16 @@ resume_submitcheck() {
   fi
   echo "Resume submitting..."
 }
+guess_submit_message() {
+  echo "## Input your commit message for submission."
+  echo ""
+  echo "## Commit history since start-work:"
+  git log --format="# %s" ${GERRIT_DEFAULTBRANCH}..
+  echo ""
+  echo "## Don't change lines below, including the empty line:"
+  echo
+  echo "Change-Id: $1"
+}
 submitwork() {
   ID=$(git branch --show-current)
   if presubmitcheck "$ID"
@@ -95,7 +105,7 @@ submitwork() {
     WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
     if [ -z $WORKCOMMIT ]
     then
-      git commit --trailer="" --trailer="#Input you commit message for submission above" --trailer="Change-Id: $ID"  --allow-empty
+      git commit -t <(guess_submit_message "$ID")   --allow-empty
     else
       git commit -C "$WORKCOMMIT" --allow-empty
     fi
