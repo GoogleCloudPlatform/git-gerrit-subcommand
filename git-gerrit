@@ -105,7 +105,7 @@ submitwork() {
     WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
     if [ -z $WORKCOMMIT ]
     then
-      git commit -t <(guess_submit_message "$ID")   --allow-empty
+      guess_submit_message "$ID"|git commit -t /dev/stdin --allow-empty
     else
       git commit -C "$WORKCOMMIT" --allow-empty
     fi
