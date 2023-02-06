@@ -105,7 +105,9 @@ submitwork() {
     WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
     if [ -z $WORKCOMMIT ]
     then
+      TMPFILE="$(mktemp /tmp/git-gerrit-XXXXXX)"
       guess_submit_message "$ID" > "${TMPFILE}"
+      trap "rm '$TMPFILE'" ERR EXIT
       git commit -t "${TMPFILE}" --allow-empty
     else
       git commit -C "$WORKCOMMIT" --allow-empty
