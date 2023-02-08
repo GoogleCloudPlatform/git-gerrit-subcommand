@@ -92,7 +92,12 @@ guess_submit_message() {
   echo "## Input your commit message for submission."
   echo ""
   echo "## Commit history since start-work:"
-  git log --format="# %s" ${GERRIT_DEFAULTBRANCH}..
+  if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 2>/dev/null
+  then
+    git log --format="# %s" ${GERRIT_DEFAULTBRANCH}..
+  else
+    git log --format="# %s"
+  fi
   echo ""
   echo "## Don't change lines below, including the empty line:"
   echo
@@ -105,7 +110,10 @@ submitwork() {
     WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
     if [ -z $WORKCOMMIT ]
     then
-      guess_submit_message "$ID"|git commit -t /dev/stdin --allow-empty
+      TMPFILE="$(mktemp /tmp/git-gerrit-XXXXXX)"
+      guess_submit_message "$ID" > "${TMPFILE}"
+      trap "rm '$TMPFILE'" ERR EXIT
+      git commit -t "${TMPFILE}" --allow-empty
     else
       git commit -C "$WORKCOMMIT" --allow-empty
     fi
