@@ -92,7 +92,12 @@ guess_submit_message() {
   echo "## Input your commit message for submission."
   echo ""
   echo "## Commit history since start-work:"
-  git log --format="# %s" ${GERRIT_DEFAULTBRANCH}..
+  if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 2>/dev/null
+  then
+    git log --format="# %s" ${GERRIT_DEFAULTBRANCH}..
+  else
+    git log --format="# %s"
+  fi
   echo ""
   echo "## Don't change lines below, including the empty line:"
   echo
