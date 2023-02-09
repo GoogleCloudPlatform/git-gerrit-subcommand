@@ -76,8 +76,12 @@ presubmitcheck() {
   fi
   if git log --format=%B -n 1 HEAD|grep -q Change-Id
   then
-    echo "Seems workspace has already been submitted" >&2
-    return 1
+    if [ "$FORCE_RESUBMIT" -eq 0 ]
+    then
+      echo "Seems workspace has already been submitted" >&2
+      return 1
+    fi
+    return 0
   fi
 }
 resume_submitcheck() {
@@ -104,6 +108,15 @@ guess_submit_message() {
   echo "Change-Id: $1"
 }
 submitwork() {
+  FORCE_RESUBMIT=0
+  while getopts f flag
+  do
+    case "$flag" in
+      f) FORCE_RESUBMIT=1
+         ;;
+      ?) exit 1;;
+    esac
+  done
   ID=$(git branch --show-current)
   if presubmitcheck "$ID"
   then
@@ -112,7 +125,7 @@ submitwork() {
     then
       TMPFILE="$(mktemp /tmp/git-gerrit-XXXXXX)"
       guess_submit_message "$ID" > "${TMPFILE}"
-      trap "rm '$TMPFILE'" ERR EXIT
+      trap "rm -f '$TMPFILE'" EXIT
       git commit -t "${TMPFILE}" --allow-empty
     else
       git commit -C "$WORKCOMMIT" --allow-empty
@@ -144,7 +157,8 @@ case ${1:-help} in
     startwork
     ;;
   submit)
-    submitwork
+    shift
+    submitwork "$@"
     ;;
   *)
     usage
