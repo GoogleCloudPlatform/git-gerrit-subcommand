@@ -49,9 +49,14 @@ GERRIT_DEFAULTBRANCH="$(git config --get --default "${GERRIT_REMOTEREF##*/}" ger
 
 startwork() {
   BRANCH=$(git branch --show-current)
-  if ! [ "$BRANCH" = "$GERRIT_DEFAULTBRANCH" ]
+  if [ "$BRANCH" = "$GERRIT_DEFAULTBRANCH" ]
   then
-    echo "Not in the default branch '$GERRIT_DEFAULTBRANCH'"
+    echo "Starting from default branch '$GERRIT_DEFAULTBRANCH'"
+  elif echo "$BRANCH"|grep -q '^I[0-9a-f]\{40\}\.c\.[a-z0-9-]*$'
+  then
+    echo "Starting from submitted change: '$BRANCH'"
+  else
+    echo "Must start from default branch '$GERRIT_DEFAULTBRANCH' or a submitted change."
     exit 1
   fi
   ID=I$(dd if=/dev/urandom count=1 2>/dev/null|git hash-object --stdin)
@@ -96,7 +101,7 @@ guess_submit_message() {
   echo "## Input your commit message for submission."
   echo ""
   echo "## Commit history since start-work:"
-  if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 2>/dev/null
+  if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 1>/dev/null 2>&1
   then
     git log --format="# %s" ${GERRIT_DEFAULTBRANCH}..
   else
@@ -107,6 +112,16 @@ guess_submit_message() {
   echo
   echo "Change-Id: $1"
 }
+find_start_point () {
+  ID="$1"
+  (if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 1>/dev/null 2>&1
+   then
+     git log "$GERRIT_DEFAULTBRANCH"^1.."$ID" --format="%H %(trailers:key=Change-Id,valueonly,separator=)" --grep="^Change-Id:"
+   else
+     git log --format="%H %(trailers:key=Change-Id,valueonly,separator=)" --grep="^Change-Id:"
+   fi)|grep -v "$ID"|head -n 1|cut -d " " -f 1
+}
+
 submitwork() {
   FORCE_RESUBMIT=0
   while getopts f flag
@@ -120,7 +135,13 @@ submitwork() {
   ID=$(git branch --show-current)
   if presubmitcheck "$ID"
   then
-    WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
+    START_POINT="$(find_start_point $ID)"
+    if [ -n "$START_POINT" ]
+    then
+      WORKCOMMIT="$(git log $(find_start_point $ID)..HEAD --format=%H --grep "^Change-Id: $ID" -n 1)"
+    else
+      WORKCOMMIT="$(git log --format=%H --grep "^Change-Id: $ID" -n 1)"
+    fi
     if [ -z $WORKCOMMIT ]
     then
       TMPFILE="$(mktemp /tmp/git-gerrit-XXXXXX)"
@@ -130,9 +151,10 @@ submitwork() {
     else
       git commit -C "$WORKCOMMIT" --allow-empty
     fi
-    if git rev-list -n 1 "${GERRIT_DEFAULTBRANCH}" 2>/dev/null
+
+    if [ -n "$START_POINT" ]
     then
-      git checkout "${GERRIT_DEFAULTBRANCH}"
+      git checkout "$START_POINT"
       git checkout -b ${ID}.submit
       git merge --squash $ID
     else
@@ -143,12 +165,22 @@ submitwork() {
       git push "${GERRIT_REMOTE}" ${ID}.submit:"${GERRIT_REMOTEREF}"
     fi
     git checkout ${ID}
-    git branch -D ${ID}.submit
+    git branch -m ${ID}.submit ${ID}.c.unknown
   elif resume_submitcheck "$ID"
   then
     git push "${GERRIT_REMOTE}" ${ID}:"${GERRIT_REMOTEREF}"
     git checkout ${ID/.submit/}
-    git branch -D $ID
+    git branch -m $ID ${ID/.submit/}.c.unknown
+  fi
+}
+
+gerrit_status () {
+  if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 1>/dev/null 2>&1
+  then
+    git log ${GERRIT_DEFAULTBRANCH}.. --oneline
+    git log -n 1 --oneline ${GERRIT_DEFAULTBRANCH}
+  else
+    git log --oneline
   fi
 }
 
@@ -159,6 +191,13 @@ case ${1:-help} in
   submit)
     shift
     submitwork "$@"
+    ;;
+  whereami)
+    gerrit_status
+    ;;
+  find_start)
+    shift
+    find_start_point "$@"
     ;;
   *)
     usage
