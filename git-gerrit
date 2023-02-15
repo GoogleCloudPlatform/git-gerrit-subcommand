@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Copyright 2022 Google LLC
 # Author: Jun Sheng
 #
@@ -184,6 +184,29 @@ gerrit_status () {
   fi
 }
 
+gerrit_pull () {
+  git fetch "$GERRIT_REMOTE" refs/changes/*:refs/remotes/"$GERRIT_REMOTE"/changes/*
+  git fetch -u "$GERRIT_REMOTE" "$GERRIT_DEFAULTBRANCH":"$GERRIT_DEFAULTBRANCH"
+  TMPFILE_1=$(mktemp /tmp/git-gerrit-pull-XXXXXX)
+  trap "rm -f '$TMPFILE_1'" EXIT
+  git branch --format "%(objectname) %(refname:lstrip=-1)" --list I[[:xdigit:]]*  > "$TMPFILE_1"
+  shopt -s extglob
+  cat "$TMPFILE_1" | while read COMMIT BNAME;
+  do
+    if echo "$BNAME"|grep -q "^I[[:xdigit:]]\+$"
+    then
+        if git log "$GERRIT_DEFAULTBRANCH" -n 1 --grep "Change-Id: $BNAME" |grep -q "$BNAME"
+        then
+          git branch -m "$BNAME" "$BNAME".merged
+        fi
+    elif echo "$BNAME"|grep -q "^I[[:xdigit:]]\+\.c\.unknown$"
+    then
+      git branch -r --contains $COMMIT --format "%(refname:lstrip=-2) %(refname:rstrip=-4)" |sed -n 's,/,-,g; /changes$/ s/ .*$//p' |(
+          while read cid; do git branch -m $BNAME ${BNAME/unknown/$cid};done)
+    fi
+done
+}
+
 case ${1:-help} in
   start-work)
     startwork
@@ -198,6 +221,9 @@ case ${1:-help} in
   find_start)
     shift
     find_start_point "$@"
+    ;;
+  pull)
+    gerrit_pull
     ;;
   *)
     usage
