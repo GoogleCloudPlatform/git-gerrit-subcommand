@@ -114,12 +114,13 @@ guess_submit_message() {
 }
 find_start_point () {
   ID="$1"
-  (if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 1>/dev/null 2>&1
-   then
-     git log "$GERRIT_DEFAULTBRANCH"^1.."$ID" --format="%H %(trailers:key=Change-Id,valueonly,separator=)" --grep="^Change-Id:"
-   else
-     git log --format="%H %(trailers:key=Change-Id,valueonly,separator=)" --grep="^Change-Id:"
-   fi)|grep -v "$ID"|head -n 1|cut -d " " -f 1
+  if git rev-list -n 1 "$GERRIT_DEFAULTBRANCH" 1>/dev/null 2>&1
+  then
+    (git log $(git merge-base "$GERRIT_DEFAULTBRANCH" "$ID").."$ID" --format="%H %(trailers:key=Change-Id,valueonly,separator=)" --grep="^Change-Id:"
+    git merge-base "$GERRIT_DEFAULTBRANCH" "$ID")|grep -v "$ID"|head -n 1|cut -d " " -f 1
+  else
+    git log --format="%H %(trailers:key=Change-Id,valueonly,separator=)" --grep="^Change-Id:"|grep -v "$ID"|head -n 1|cut -d " " -f 1
+  fi
 }
 
 submitwork() {
@@ -213,14 +214,14 @@ case ${1:-help} in
     ;;
   submit)
     shift
-    submitwork "$@"
+    submitwork "$@" && gerrit_pull
     ;;
   whereami)
     gerrit_status
     ;;
   find_start)
     shift
-    find_start_point "$@"
+    find_start_point $(git branch --show-current)
     ;;
   pull)
     gerrit_pull
