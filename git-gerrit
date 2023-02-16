@@ -208,6 +208,27 @@ gerrit_pull () {
 done
 }
 
+unveil_cl() {
+  if [ $# -lt 2 ]; then
+    cat <<EOF
+
+Create a branch with name: Change-ID.c.changenum-patchidx and checkout on it. make it ready for start a related-change work. 
+
+Usage: git gerrit unveil-cl changenum patchidx
+
+       changenum: numeric change id
+       pathcidx: numeric patch index
+EOF
+    exit 1
+  fi
+  CHANGE=$1
+  PATCH=$2
+  BRANCH="$(git branch -r --list */changes/*/"$CHANGE"/"$PATCH" --format '%(refname:lstrip=2)')"
+  ID=$(git log -n 1 "$BRANCH"|sed -n 's/^[[:space:]]*Change-Id: //p'|head -n 1)
+  if [ -n "$ID" ]; then
+    git checkout "$BRANCH" -b "$ID".c."$CHANGE"-"$PATCH"
+  fi
+}
 case ${1:-help} in
   start-work)
     startwork
@@ -219,12 +240,16 @@ case ${1:-help} in
   whereami)
     gerrit_status
     ;;
-  find_start)
+  find-start)
     shift
     find_start_point $(git branch --show-current)
     ;;
   pull)
     gerrit_pull
+    ;;
+  unveil-cl)
+    shift
+    unveil_cl "$@"
     ;;
   *)
     usage
