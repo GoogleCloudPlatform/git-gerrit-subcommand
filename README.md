@@ -84,6 +84,46 @@ git config --add gerrit.remoteRef refs/for/main
 1. If needed, make more developments and commits and submit the changes by following the previous steps 
 1. Submit CL again
 
+### Related Change
+
+Now git-gerrit can do related change.
+
+#### `start-work` can start from a "change-set branch".
+
+"change-set branch" is a branch with name like: 'Change-Id'.c.number-number. git-gerrit submit will automatically create change-set branch.
+
+You can also create a change-set branch from a known numeric change id:
+
+```shell-script
+git gerrit unveil-cl change-number patchset-index
+git gerrit start-work
+```
+
+#### `submit` can be used as usual.
+
+The `submit` will first rename the `'Change-Id'.submit` branch to `'Change-Id'.c.unknown` and then call `git gerrit pull` which will rename the `.unknown` branches to the proper `changenum-patchidx` branches.
+
+#### `whereami`
+
+Show the related-change chain currently in.
+
+#### `pull`
+
+Usage: `git gerrit pull`
+
+Fetch change-sets and the main/master branch from gerrit server.
+
+#### `unveil-cl` 
+
+Usage: `git gerrit unveil-cl changenum patchidx`
+
+Create a change-set branch with name: Change-ID.c.changenum-patchidx and checkout on it. make it ready for start a related-change 
+
+- changenum: numeric change id
+- pathcidx: numeric patch index
+
+TODO
+
 ### Config values
 
 1. `gerrit.remoteName` the name of a git remote pointing to the gerrit repo, default to `gerrit`
