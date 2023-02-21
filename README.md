@@ -124,6 +124,61 @@ Create a change-set branch with name: Change-ID.c.changenum-patchidx and checkou
 
 ### How to rebase
 
+#### rebase concepts
+
+1. rebase to head of main/master
+
+```shell-script
+
+A--B--C :main
+   \--D--E--F :CL
+
+```
+
+After running `git rebase main CL`, it becomes
+
+```shell-script
+
+A--B--C :main
+      \--D`--E`--F` :CL
+
+```
+
+Note that commits D,E,F in CL branch are all amended.
+
+1. rebase from one CL to another CL
+
+```shell-script
+A--B--C: main
+      |--D` :CL-2
+      \--D  :CL-1
+         \--E--F :CL
+```
+After running `git rebase --onto CL-2 CL-1 CL`, it becomes
+```shell-script
+A--B--C: main
+      |--D` :CL-2
+         \--E`--F` :CL
+      \--D  :CL-1
+```
+
+1. rebase from CL to main/master
+
+```shell-script
+A--B--C: main
+   \--D  :CL-1
+    \--E--F :CL
+```
+After running `git rebase --onto main CL-1 CL`, it becomes
+
+```shell-script
+A--B--C: main
+   |   \--E`--F` :CL
+   \--D  :CL-1
+
+```
+
+
 #### main/master branch has updates
 
 Rebase your working branch to main/master:
