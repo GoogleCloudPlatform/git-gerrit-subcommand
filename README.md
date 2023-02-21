@@ -130,8 +130,8 @@ Create a change-set branch with name: Change-ID.c.changenum-patchidx and checkou
 
 ```shell-script
 
-A--B--C :main
-   \--D--E--F :CL
+A--B--C <- main
+   \--D--E--F <- CL
 
 ```
 
@@ -139,42 +139,42 @@ After running `git rebase main CL`, it becomes
 
 ```shell-script
 
-A--B--C :main
-      \--D`--E`--F` :CL
+A--B--C <- main
+      \--D`--E`--F` <- CL
 
 ```
 
 Note that commits D,E,F in CL branch are all amended.
 
-1. rebase from one CL to another CL
+2. rebase from one CL to another CL
 
 ```shell-script
 A--B--C: main
-      |--D` :CL-2
-      \--D  :CL-1
-         \--E--F :CL
+      |--D` <- CL-2
+      \--D  <- CL-1
+         \--E--F <- CL
 ```
 After running `git rebase --onto CL-2 CL-1 CL`, it becomes
 ```shell-script
-A--B--C: main
-      |--D` :CL-2
-         \--E`--F` :CL
-      \--D  :CL-1
+A--B--C  <- main
+      |--D` <- CL-2
+      |  \--E`--F` <- CL
+      \--D  <- CL-1
 ```
 
-1. rebase from CL to main/master
+3. rebase from CL to main/master
 
 ```shell-script
-A--B--C: main
-   \--D  :CL-1
-    \--E--F :CL
+A--B--C <- main
+   \--D  <- CL-1
+    \--E--F <- CL
 ```
 After running `git rebase --onto main CL-1 CL`, it becomes
 
 ```shell-script
-A--B--C: main
-   |   \--E`--F` :CL
-   \--D  :CL-1
+A--B--C <- main
+   |   \--E`--F` <- CL
+   \--D  <- CL-1
 
 ```
 
