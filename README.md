@@ -182,3 +182,9 @@ Fix conflicts and do `git rebase --continue`, repeate until all conflicts are fi
 The sub-command `start-work` acutally creates a new branch. The development will happen under that branch.
 
 The sub-command `submit` squashes all commits in the current branch and submit it to `gerrit`. The branch name is used as `Change-Id`.
+
+## FAQ
+
+1. `git gerrit submit` failed due to SSO failure(or network failure etc.), what to do?
+
+   - do `git gerrit submit -f` to forcefully resubmit.
