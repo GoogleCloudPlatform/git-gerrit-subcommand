@@ -122,7 +122,55 @@ Create a change-set branch with name: Change-ID.c.changenum-patchidx and checkou
 - changenum: numeric change id
 - pathcidx: numeric patch index
 
-TODO
+### How to rebase
+
+#### main/master branch has updates
+
+Rebase your working branch to main/master:
+
+```shell-script
+git rebase master
+```
+
+Solve the conflicts and do `git rebase --continue`, repeate until all conflicts are solved.
+
+#### related change has a new change-set
+
+Suppose the current work branch name is `Ixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`, it is based on changeset branch `Iyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.c.10001-1`, here the changenum is 10001 and patchnum is 1; suppose the new changeset has a `patchnum` of 2.
+
+Fetch and unveil that new change-set, change num is 10001, patch num is 2:
+
+```shell-script
+git gerrit pull
+git gerrit unveil-cl 10001 2
+```
+
+Rebase to that new change-set:
+
+```shell-script
+git rebase --onto Iyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.c.10001-2 Iyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.c.10001-1 Ixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Fix conflicts and do `git rebase --continue`, repeate until all conflicts are fixed.
+
+Now your entire work in `Ixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` is based on change-set 10001-2
+
+#### related change has been merged in master
+
+Suppose the current work branch name is `Ixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`, it is based on changeset branch `Iyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.c.10001-1`, here the changenum is 10001 and patchnum is 1; now all works in `Iyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy` has been accepted and in master. 
+
+rebase `Ixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` to master:
+
+```shell-script
+git rebase --onto master Iyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.c.10001-1 Ixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+Fix conflicts and do `git rebase --continue`, repeate until all conflicts are fixed.
+
+#### rebase practise
+
+1. Rebase the changeset closer to master first. For example, run `git gerrit whereami`, rebase from the bottom.
+1. Squash changes in current branch before rebase, might reduce the efforts in solving conflicts
+1. avoid editing the same file in a related-change chain.
 
 ### Config values
 
