@@ -149,7 +149,7 @@ Note that commits D,E,F in CL branch are all amended.
 2. rebase from one CL to another CL
 
 ```shell-script
-A--B--C: main
+A--B--C <- main
       |--D` <- CL-2
       \--D  <- CL-1
          \--E--F <- CL
@@ -167,7 +167,7 @@ A--B--C  <- main
 ```shell-script
 A--B--C <- main
    \--D  <- CL-1
-    \--E--F <- CL
+      \--E--F <- CL
 ```
 After running `git rebase --onto main CL-1 CL`, it becomes
 
