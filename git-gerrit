@@ -28,6 +28,12 @@ The following configs are used:
      You can set this config by running:
          git config --add gerrit.remoteName  my-gerrit-remote
 
+   gerrit.remoteIsNotGerrit
+     Whether the remote is a Gerrit or not. If this is true, this tool will push
+     the change to ChangeId.submit instead of gerrit.remoteRef.
+     You can set this config by running:
+         git config --add gerrit.remoteIsNotGerrit true
+
    gerrit.remoteRef
      The ref which review will happen, default is 'refs/for/main'.
      You can set this config by running:
@@ -44,6 +50,7 @@ EOF
 }
 
 GERRIT_REMOTE="$(git config --get --default gerrit gerrit.remoteName)"
+GERRIT_REMOTE_IS_NOT_GERRIT="$(git config --get --default false gerrit.remoteIsNotGerrit)"
 GERRIT_REMOTEREF="$(git config --get --default refs/for/main gerrit.remoteRef)"
 GERRIT_DEFAULTBRANCH="$(git config --get --default "${GERRIT_REMOTEREF##*/}" gerrit.defaultBranch)"
 
@@ -163,7 +170,12 @@ submitwork() {
     fi
     if git commit -C $ID
     then
-      git push "${GERRIT_REMOTE}" ${ID}.submit:"${GERRIT_REMOTEREF}"
+      if [ "$GERRIT_REMOTE_IS_NOT_GERRIT" = "true" ]
+      then
+        git push -f "${GERRIT_REMOTE}" ${ID}.submit
+      else
+        git push "${GERRIT_REMOTE}" ${ID}.submit:"${GERRIT_REMOTEREF}"
+      fi
     fi
     git checkout ${ID}
     git branch -m ${ID}.submit ${ID}.c.unknown
