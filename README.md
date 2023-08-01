@@ -238,6 +238,19 @@ The sub-command `start-work` acutally creates a new branch. The development will
 
 The sub-command `submit` squashes all commits in the current branch and submit it to `gerrit`. The branch name is used as `Change-Id`.
 
+## Use with GitHub
+
+GitHub doesn't have the concept of `CL` nor `change`. Instead, GitHub uses pull-request as a communication point between developers. But the linear git history still can be achieved with GitHub. This tool can be used to get one-commit-per-pull-request as part of practices needed to achieve linear git history. 
+
+### Usage
+
+Setting git config `gerrit.remoteIsNotGerrit` to `true` is to tell this tool that the remote repo is actually not a gerrit.
+
+The mechanism is when running `git gerrit submit`, instead of pushing the `'Change-Id'.submit` branch to `refs/for/main` in the remote repo, this tool will just push the branch `'Change-Id'.submit` to remote repo with the same branch name. 
+
+Then you can create a pull-request from this `'Change-Id'.submit` branch. 
+
+
 ## FAQ
 
 1. `git gerrit submit` failed due to SSO failure(or network failure etc.), what to do?
