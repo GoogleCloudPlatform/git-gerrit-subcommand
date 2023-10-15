@@ -1,0 +1,111 @@
+name: Release
+on:
+  push:
+    tags:
+    - "v[0-9]+.[0-9]+.[0-9]+"
+    - "v[0-9]+.[0-9]+.[0-9]+-rc-[0-9]+"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@master
+    - name: Cache Racket dependencies
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cache/racket
+          ~/.local/share/racket
+        key: ${{ runner.os }}-racket-8.10
+    - name: Install Racket
+      uses: Bogdanp/setup-racket@v1.5
+      with:
+        architecture: 'x64'
+        distribution: 'full'
+        variant: 'CS'
+        version: '8.10'
+    - name: Install Dependencies
+      run: raco pkg install --auto --skip-installed raco-cross
+
+    - name: Set env vars
+      run: |
+        echo VERSION=${GITHUB_REF#refs/tags/v} >> $GITHUB_ENV
+      
+    - name: Build Binaries
+      run: |
+        cd racket
+        echo "$VERSION" > version.inc
+        bash build-all.sh
+        ./git-gerrit.x86_64-linux version
+
+    - name: Create release body file
+      run: |
+        cat <<EOF > ${{ runner.temp }}/body.md
+        ## Binaries
+        Install Guide: [README.md](${{ github.server_url }}/${{ github.repository }}/blob/$(git rev-parse HEAD)/README.md)
+        
+        Checksums for all files:
+        
+        EOF
+    - name: Generate Sha256sum
+      run: |
+        (cd racket
+        echo "```"
+        sha256sum git-gerrit.aarch64-macosx  git-gerrit.x86_64-linux  git-gerrit.x86_64-macosx  git-gerrit.x86_64-win32.exe
+        echo "```" ) >> ${{ runner.temp }}/body.md
+    - name: Create release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.VERSION }}
+        release_name: ${{ env.VERSION }}
+        commitish: ${{env.COMMITISH }}
+        body_path: ${{ runner.temp }}/body.md
+
+    - name: Upload binary macosx aarch64
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: racket/git-gerrit.aarch64-macosx
+        asset_name: git-gerrit.aarch64-macosx
+        asset_content_type: application/octet-stream
+
+    - name: Upload binary macosx x86_64
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: racket/git-gerrit.x86_64-macosx
+        asset_name: git-gerrit.x86_64-macosx
+        asset_content_type: application/octet-stream
+
+    - name: Upload binary Linux x86_64
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: racket/git-gerrit.x86_64-linux
+        asset_name: git-gerrit.x86_64-linux
+        asset_content_type: application/octet-stream        
+
+    - name: Upload binary Windows x86_64
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: racket/git-gerrit.x86_64-win32.exe
+        asset_name: git-gerrit.x86_64-win32.exe
+        asset_content_type: application/octet-stream        
+        

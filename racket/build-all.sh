@@ -19,9 +19,11 @@ set -e
 raco test scsh/test.rkt
 raco test alvs/test.rkt
 
-for i in x86_64-win32 aarch64-macosx x86_64-macosx x86_64-linux;
+for i in aarch64-macosx x86_64-macosx x86_64-linux;
 do
   raco cross --target $i make git-gerrit.rkt;
   raco cross --target $i exe --orig-exe -o git-gerrit.$i git-gerrit.rkt ;
 done
 
+raco cross --target x86_64-win32  make git-gerrit.rkt
+raco cross --target x86_64-win32  exe --orig-exe --embed-dlls -o git-gerrit.x86_64-win32 git-gerrit.rkt

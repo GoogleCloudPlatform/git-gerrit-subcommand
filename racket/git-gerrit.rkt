@@ -15,7 +15,14 @@
 
 #lang racket
 
-(define VERSION "0.1-preview")
+(include/reader
+ "version.inc"
+ (lambda (fn p)
+   (let ((s (read-line p)))
+     (if (eof-object? s)
+	 s
+	 (datum->syntax #f `(define GIT-GERRIT-VERSION ,s))))))
+
 (require "scsh/scsh-repf.rkt")
 
 (require "alvs/and-let-values.rkt")
@@ -27,7 +34,7 @@
 	  [arch (system-type 'arch)]
 	  [vm (system-type 'vm)])
       (display (format
-		"git-gerrit ~a.\n" VERSION))
+		"git-gerrit ~a.\n" GIT-GERRIT-VERSION))
       (display (format "Runtime: racket(~a) ~a, ~a, ~a.\n"
 		       vm
 		       (version)
