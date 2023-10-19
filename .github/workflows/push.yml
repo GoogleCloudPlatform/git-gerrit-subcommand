@@ -1,0 +1,39 @@
+name: Push
+on:
+  push:
+    branches:
+      - new-approach
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@master
+    - name: Cache Racket dependencies
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cache/racket
+          ~/.local/share/racket
+        key: ${{ runner.os }}-racket-8.10
+    - name: Install Racket
+      uses: Bogdanp/setup-racket@v1.5
+      with:
+        architecture: 'x64'
+        distribution: 'full'
+        variant: 'CS'
+        version: '8.10'
+    - name: Install Dependencies
+      run: raco pkg install --auto --skip-installed raco-cross
+
+    - name: Set env vars
+      run: |
+        echo S_VERSION=$(git rev-parse HEAD) >> $GITHUB_ENV
+      
+    - name: Build Binaries
+      run: |
+        cd racket
+        echo "$S_VERSION" > version.inc
+        bash build-all.sh
+        ./git-gerrit.x86_64-linux version
