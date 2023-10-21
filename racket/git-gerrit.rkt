@@ -23,6 +23,7 @@
 	 s
 	 (datum->syntax #f `(define GIT-GERRIT-VERSION ,s))))))
 
+
 (require "scsh/scsh-repf.rkt")
 
 (require "alvs/and-let-values.rkt")
@@ -45,6 +46,8 @@
 (define gerrit-remote (make-parameter "origin"))
 (define top-level (make-parameter #f))
 (define upload-prefix (make-parameter "refs/for"))
+
+(define gerrit-remote-is-github (make-parameter #f))
 
 (define (gerrit-config-name*  ws cfg)
   (format "gerrit.~a~a" ws (if cfg (format ".~a" cfg)
@@ -117,11 +120,17 @@
       (git config --get ,(gerrit-config-name ,ws-name change-id)))]
     [(0 last-upload) 'gerrit.last-upload
      (run/status+car-strings
-      (git config --get --default 0 ,(gerrit-config-name ,ws-name last-upload)))])
+      (git config --get --default 0 ,(gerrit-config-name ,ws-name last-upload)))]
+    [(0 github?) 'gerrit-remote-is-github
+     (run/status+car-strings
+      (git config --local --get --default "false" gerrit.remoteisgithub))])
    (let-values
        ([(code not-submitted)
 	 (check-not-submitted base-branch change-id)])
-     (values ws-name base-branch related-to change-id last-upload not-submitted))
+     (begin
+       (when (equal? github? "true")
+	 (gerrit-remote-is-github #t))
+       (values ws-name base-branch related-to change-id last-upload not-submitted)))
    (else
     (lambda (t)
       (let ([reason
@@ -164,13 +173,13 @@
 	     (values 0 #t)
 	     (values 0 #f)))]
       [(0 max-ref-commit) 'find-real-max-ref-commit
-       (if related-base-merged
+       (if (and temp-max-ref-commit related-base-merged)
 	   (run/status+car-strings
 	    (git log -n 1 "--format=%H" ,base-branch "--"))
 	   (values 0 temp-max-ref-commit))]
       [(0 fork-point) 'get-forkpoint
        (find-merge-point ws-name base-branch
-			 (if related-base-merged "0" related-to) )]
+			 related-to )]
       [(0 fork-commit) 'get-forkpoint-commit
        (if fork-point
 	   (run/status+car-strings
@@ -183,18 +192,29 @@
 	   (values 0 temp-need-upload))]
       
       [(0 rebase-suggestion rebase-from) 'find-rebase-suggestion
-       (if (or related-base-merged
-	       (equal? related-to "0"))
-	   (values 0
-		   (if (equal? fork-commit max-ref-commit)
-		       #f
-		       base-branch)
-		   base-branch)
-	   (values 0
-		   (if (equal? fork-commit max-ref-commit)
-		       #f
-		       max-ref)
-		   fork-point))])
+       (match*
+	(related-base-merged related-to (equal? fork-commit max-ref-commit))
+	[(#t "0" #t) (values 0 #f base-branch)]
+	[(#t _   #t) (values 0 #f fork-point)]
+	[(#t "0" #f) (values 0 base-branch base-branch)]
+	[(#t _   #f) (values 0 base-branch fork-point)]
+	[(#f "0" #t) (values 0 #f base-branch)]
+	[(#f _   #t) (values 0 #f fork-point)]
+	[(#f "0" #f) (values 0 max-ref base-branch)]
+	[(#f _   #f) (values 0 max-ref fork-point)])
+       ;; (if (or related-base-merged
+       ;; 	       (equal? related-to "0"))
+       ;; 	   (values 0
+       ;; 		   (if (equal? fork-commit max-ref-commit)
+       ;; 		       #f
+       ;; 		       base-branch)
+       ;; 		   base-branch)
+       ;; 	   (values 0
+       ;; 		   (if (equal? fork-commit max-ref-commit)
+       ;; 		       #f
+       ;; 		       max-ref)
+       ;; 		   fork-point))
+       ])
      (values ws-name need-upload rebase-suggestion rebase-from (if related-base-merged "0" related-to) change-id base-branch fork-point)
      (else (lambda (t)
 	     (match t
@@ -238,7 +258,7 @@
       (lambda ()
 	(delete-file tmp-file)))))
 
-(define (squash-and-upload ws message-commit start-ref base-branch need-upload)
+(define (squash-and-upload ws changeid message-commit start-ref base-branch need-upload)
   (and-let*-tag-values-check
    ([('ok top-commit) 'uploaded
      (if need-upload
@@ -257,9 +277,13 @@
 		 ))]
     [(0) 'commit
      (run (git commit -C ,message-commit))]
+    [(0 remote-ref-to-push push-opt) 'gen-remote-ref
+     (if (gerrit-remote-is-github)
+	 (values 0 (format "~a.~a" ws changeid) '("-f"))
+	 (values 0 (format "~a/~a" (upload-prefix) base-branch) '()))]
     [(0) 'upload
-     (let ([s1 (run (git -c remote.origin.mirror=false push ,(gerrit-remote)
-		      ,(format "~a:~a/~a" upload-branch (upload-prefix) base-branch)))])
+     (let ([s1 (run (git -c remote.origin.mirror=false push ,@push-opt ,(gerrit-remote)
+			 ,(format "~a:~a" upload-branch remote-ref-to-push)))])
        (run (git checkout ,ws))
        (run (git branch -D ,upload-branch))
        s1)]
@@ -311,7 +335,7 @@
 		  (go-with-message-commit (car out))
 		  (begin (get-a-new-message-commit start-ref changeid)
 			 (go-with-message-commit #f))))
-	    (squash-and-upload ws-name message-commit start-ref base-branch need-upload)))))))
+	    (squash-and-upload ws-name changeid message-commit start-ref base-branch need-upload)))))))
 
 (define (find-merge-point ws base-branch related-to)
   (if (equal? related-to "0")
@@ -560,7 +584,48 @@
 
        0))))
 
-(define (gerrit-init repo-url)
+(define (repo-url->dir repo-url)
+  (match (regexp-match #rx"^.*?([^:/]*?)(/?.git)?$" repo-url)
+    [(list _ (? string? x) _) x]
+    [_ 'invalid-repo]))
+
+(define (create-dir-and-enter dir thunk count)
+  (if (> count 5)
+      (begin (display "Retry counts overflow\n"
+		      (current-error-port))
+	     1)
+      (match (let		 
+		 ([dir-exists (directory-exists? dir)])
+	       (list
+		dir-exists
+		(and dir-exists
+		     (null? (directory-list dir)))))
+	[(list #t #t) 
+	 (begin
+	   (current-directory dir)
+	   (thunk))]
+	[(list #f _) 
+	 (begin
+	   (make-directory dir)
+	   (create-dir-and-enter dir thunk (+ 1 count)))]
+	[else (begin
+		(display (format "Target dir \"~a\" is not empty.\n" dir)
+			 (current-error-port))
+		1)])))
+
+(define (gerrit-init repo-url dir github?)
+  (match dir
+    [(list (? string? x) _ ...)
+     (gerrit-init repo-url x github?)]
+    ['() (gerrit-init repo-url (repo-url->dir repo-url) github?)]
+    [(? string? x) (create-dir-and-enter
+		    x (lambda ()
+			(gerrit-init-real repo-url github?)) 0)]
+    ['invalid-repo
+     (display "can't derive dirname from repo-url.\n"
+	      (current-error-port))]))
+
+(define (gerrit-init-real repo-url github?)
   (and-let*-tag-values-check
    ([(0 _) 'mirror-repo
      (values (run (git clone --mirror ,repo-url ,(gerrit-dir))) #t)]
@@ -584,7 +649,9 @@
       [(0 _) 'set-worktree
        (run/status+strings (git config --worktree --add "core.worktree" ,(format "~a" (current-directory))))]
       [(0 _) 'set-pull-rebase
-       (run/status+strings (git config --worktree --add "pull.ff" "only"))])
+       (run/status+strings (git config --worktree --add "pull.ff" "only"))]
+      [(0 _) 'set-githubflag
+       (run/status+strings (git config --local --add "gerrit.remoteisgithub" ,(if github? "true" "false")  ))])
      (display
       (format "Dummy workspace ~a created.\n" dft-branch))
      (else (lambda (t)
@@ -769,13 +836,18 @@
   (let*
       ([cmd-name "init"]
        [cmd (lambda (args)
-	      (let ((repo-url
-		     (command-line
-		      #:program (format "git-gerrit ~a" cmd-name)
-		      #:argv args
-		      #:args (repo-url)
-		      repo-url)))
-		(exit (gerrit-init repo-url))))])
+	      (let ((github-flag (make-parameter #f)))
+		(let-values		    
+		    (((repo-url dir)
+		      (command-line
+		       #:program (format "git-gerrit ~a" cmd-name)
+		       #:argv args
+		       #:once-each
+		       ["--github" "The remote repo is github, a branch will be created when upload."
+			(github-flag #t)]
+		       #:args (repo-url . dir)
+		       (values repo-url dir))))
+		    (exit (gerrit-init repo-url dir (github-flag))))))])
     (hash-set! sub-commands cmd-name cmd)
     cmd))
 
@@ -938,6 +1010,61 @@
 	   ns))
       (lambda x (display x) (newline)))))
 
+(define (hook-get-change-num change-id)
+  (let* ((max-change-num (string->number
+			  (car
+			   (run/strings
+			    (git config --local --get --default "1000" gerrit.last-changenum)))))
+	 (change-num
+	  (string->number
+	   (car
+	    (run/strings
+	     (git config --local --get --default ,(+ 1 max-change-num) ,(format "gerrit.cid.~a" change-id))))))
+	 (_ (when (> change-num max-change-num)
+	      (begin
+		(run (git config --local --replace-all gerrit.last-changenum ,change-num))
+		(run (git config --local --replace-all ,(format "gerrit.cid.~a" change-id) ,change-num))))))
+    change-num))
+
+(define (hook-get-patchset-path change-num)
+  (let* ((str-num (format "~a" change-num))
+	 (frag (substring str-num (- (string-length str-num) 2)))
+	 (path (format "refs/changes/~a/~a" frag str-num)))
+    (if (directory-exists? path)
+	(let ((patches (map (lambda (x) (string->number (path->string x))) (directory-list path))))
+	  (format "~a/~a" path
+		  (let lp ((p patches)
+			   (mp 0))
+		    (if (pair? p)
+			(if (> (car p) mp)
+			    (lp (cdr p) (car p))
+			    (lp (cdr p) mp))
+			(+ 1 mp)))))
+	(begin (run/strings
+		(mkdir -p ,path))
+	       (format "~a/1" path)))))
+
+(define (post-rec-hook)
+  (let loop ((all-lines (port->lines)))
+    (when (pair? all-lines)
+      (begin
+	(match (string-split (car all-lines))
+	  [(list old new ref)
+	   (let*
+	       ((change-id
+		 (values (car (run/strings
+			       (git log -n1
+				    "--format=%(trailers:key=Change-Id,valueonly=true,separator=)"
+				    ,ref)))))
+		[change-num
+		 (hook-get-change-num change-id)]
+		[patch-ref
+		 (hook-get-patchset-path change-num)])
+	     (begin
+	       (printf "~a\n" patch-ref)
+	       (run (mv ,ref ,patch-ref))))])
+	(loop (cdr all-lines))))))
+
 (module+ main
   (define (main)
     (let ((chain-gargs
@@ -946,8 +1073,8 @@
 	     (cmd args))))
       (match (current-command-line-arguments)
 	[(vector gargs ... (and cmd (? (lambda (x)
-				       (hash-has-key?
-					sub-commands x)))) args ...)
+					 (hash-has-key?
+					  sub-commands x)))) args ...)
 	 (chain-gargs gargs (hash-ref sub-commands cmd) args)]
 	[(vector gargs ... "eval" args ...)
 	 (chain-gargs gargs debug args)]
