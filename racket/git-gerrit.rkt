@@ -225,38 +225,49 @@
 	     (exit 1))))))
 
 
-(define (get-a-new-message-commit base-branch changeid)
-  (let ((tmp-file (make-temporary-file "git-gerrit~a")))
-    (dynamic-wind
-      (lambda () #t)
-      (lambda ()
-	(with-output-to-file tmp-file
-	  (lambda ()
-	    (begin
-	      (display "## Input your commit message for submission\n\n")
-	      (display "## Commit history since start-workspace:\n")
-	      (let-values ([(status outs)
-			    (if base-branch
-				(run/status+strings
-				 (git log "--format=# %s" ,(format "~a.." base-branch) "--"))
-				(run/status+strings
-				 (git log "--format=# %s")))])
-		(if (eq? status 0)
-		    (display (string-join outs "\n"))
-		    (begin
-		      (display "Error on getting history\n"
-			       (current-error-port))
-		      (exit 1))))
-	      (display "\n\n")
-	      (display "## Don't change lines below, including the empty line:\n\n")
-	      (display (format "Change-Id: ~a\n" changeid))))
-	  #:exists 'truncate)
-	(if (eq? 0 (run (git commit -t ,(path->string tmp-file) --allow-empty)))
+(define (get-a-new-message-commit base-branch changeid message signoff)
+  (let ((tmp-file (make-temporary-file "git-gerrit~a"))
+	(signoff-flag (if signoff
+			  '("-s")
+			  '())))
+    (if message
+	(if (eq? 0 (run (git commit -m ,message --allow-empty
+			     ,(format "--trailer=Change-Id: ~a" changeid)
+			     ,@signoff-flag)))
 	    #t
-	    (begin (display "Abort.\n" (current-error-port))
-		   (exit 1))))
-      (lambda ()
-	(delete-file tmp-file)))))
+	    (begin
+	      (eprintf "Abort.\n")
+	      (exit 1)))
+	(dynamic-wind
+	  (lambda () #t)
+	  (lambda ()
+	    (with-output-to-file tmp-file
+	      (lambda ()
+		(begin
+		  (display "## Input your commit message for submission\n\n")
+		  (display "## Commit history since start-workspace:\n")
+		  (let-values ([(status outs)
+				(if base-branch
+				    (run/status+strings
+				     (git log "--format=# %s" ,(format "~a.." base-branch) "--"))
+				    (run/status+strings
+				     (git log "--format=# %s")))])
+		    (if (eq? status 0)
+			(display (string-join outs "\n"))
+			(begin
+			  (display "Error on getting history\n"
+				   (current-error-port))
+			  (exit 1))))
+		  (display "\n\n")
+		  (display "## Don't change lines below, including the empty line:\n\n")
+		  (display (format "Change-Id: ~a\n" changeid))))
+	      #:exists 'truncate)
+	    (if (eq? 0 (run (git commit -t ,(path->string tmp-file) --allow-empty ,@signoff-flag)))
+		#t
+		(begin (display "Abort.\n" (current-error-port))
+		       (exit 1))))
+	  (lambda ()
+	    (delete-file tmp-file))))))
 
 (define (squash-and-upload ws changeid message-commit start-ref base-branch need-upload)
   (and-let*-tag-values-check
@@ -315,7 +326,7 @@
 		   (current-error-port))
 	  1]))
 
-(define (upload-change ws)
+(define (upload-change ws change-message signoff)
   (call/top-level
    ws (top-level)
    (lambda ()
@@ -333,7 +344,7 @@
 			   (git log -n 1 "--format=%H" --grep ,(format "^Change-Id: ~a$" changeid)))])
 	      (if (and (eq? status 0) (pair? out))
 		  (go-with-message-commit (car out))
-		  (begin (get-a-new-message-commit start-ref changeid)
+		  (begin (get-a-new-message-commit start-ref changeid change-message signoff)
 			 (go-with-message-commit #f))))
 	    (squash-and-upload ws-name changeid message-commit start-ref base-branch need-upload)))))))
 
@@ -688,9 +699,11 @@
     [(0) 'remote-update
      (run (git --git-dir ,(gerrit-dir) remote update))]
     [(0) 'sync-main
-     (with-cwd
-      (build-path (gerrit-dir) ".." dft-branch)
-      (run (git pull origin ,dft-branch)))])
+     (if (not (check-empty-base-branch dft-branch))
+	 (with-cwd
+	  (build-path (gerrit-dir) ".." dft-branch)
+	  (run (git pull origin ,dft-branch)))
+	 0)])
    0
    (else (lambda (t)
 	   (display (format "Error at: ~a" t)
@@ -856,17 +869,23 @@
       ([cmd-name "upload"]
        [cmd (lambda  (args)
 	      (let* ((no-sync (make-parameter #f))
+		     (change-message (make-parameter #f))
+		     (signoff (make-parameter #f))
 		     (ws (command-line
 			  #:program (format "git-gerrit ~a" cmd-name)
 			  #:argv args
 			  #:once-each
-			  ["-n" "--no-sync" "Don't sync repo."
+			  ["-n" "--no-sync" "Don't sync repo after upload."
 			   (no-sync #t)]
+			  ["-m" message "Specify the change-message."
+			   (change-message message)]
+			  [("-s" "--signoff") "Add a Signed-off-by trailer by the committer at the end of the change message."
+			   (signoff #t)]
 			  #:args ws
 			  (if (pair? ws)
 			      (car ws)
 			      #f))))
-		(exit (if (eq? 0 (upload-change ws))
+		(exit (if (eq? 0 (upload-change ws (change-message) (signoff)))
 			  (if (not (no-sync))
 			      (sync-repo #t)
 			      0)
@@ -918,18 +937,25 @@
       ([cmd-name "modify-desc"]
        [cmd
 	(lambda (args)
-	  (begin (command-line
-		  #:program (format "git-gerrit ~a" cmd-name)
-		  #:argv args
-		  #:usage-help
-		  "Update commit message for current change.")
-		 (exit
-		  (let-values
-		      ([(ws-name base-branch related-to changeid last-upload not-submitted)
-			(get-ws-config)])
-		    (if (get-a-new-message-commit base-branch changeid)
-			0
-			1)))))])
+	  (let* ((change-message (make-parameter #f))
+		 (signoff (make-parameter #f)))
+	    (begin (command-line
+		    #:program (format "git-gerrit ~a" cmd-name)
+		    #:argv args
+		    #:once-each
+		    ["-m" message "Specify the change-message."
+		     (change-message message)]
+		    [("-s" "--signoff") "Add a Signed-off-by trailer by the committer at the end of the change message."
+		     (signoff #t)]
+		    #:usage-help
+		    "Update commit message for current change.")
+		   (exit
+		    (let-values
+			([(ws-name base-branch related-to changeid last-upload not-submitted)
+			  (get-ws-config)])
+		      (if (get-a-new-message-commit base-branch changeid (change-message) (signoff))
+			  0
+			  1))))))])
     (hash-set! sub-commands cmd-name cmd)
     cmd))
 
@@ -964,6 +990,12 @@
 	     (path->string (build-path g-dir "GERRIT")))
 	    )
 	 ("Specify gerrit dir, shall have \"GERRIT\"." "g-dir")]
+	[("--gerrit-dir-raw")
+	 ,(lambda (f g-dir)
+	    (temp-gerrit-dir
+	     g-dir)
+	    )
+	 ("Specify gerrit dir, shall be a git repo." "g-dir-raw")]
 	[("--trace")
 	 ,(lambda (f) (scsh-trace #t))
 	 ("Print git commands when executing.")])
@@ -994,7 +1026,7 @@
 	  (top-level (car temp-top-level))
 	  #f))
     (if (temp-gerrit-dir)
-	(gerrit-dir temp-gerrit-dir)
+	(gerrit-dir (temp-gerrit-dir))
 	(if (top-level)
 	    (gerrit-dir (path->string (build-path (top-level) ".." "GERRIT")))
 	    #f)))
@@ -1064,6 +1096,182 @@
 	       (printf "~a\n" patch-ref)
 	       (run (mv ,ref ,patch-ref))))])
 	(loop (cdr all-lines))))))
+
+(define (init-a-gerrit)
+  (begin
+    (run (git init --bare -b main))
+    (run (tee "hooks/post-receive")
+	 (<< (format "~a\n~a ~a\n"
+		     "#!/bin/bash"
+		     (find-system-path 'run-file)
+		     "eval '(post-rec-hook)'")))
+    (run (chmod "+x" "hooks/post-receive"))))
+
+(define (submit-a-change change-num branch)
+  (begin
+    (gerrit-dir ".")
+    (and-let*-tag-values-check
+     ([(0 ref) 'find-change-num
+       (find-change-max change-num)]
+      [(0 base-is-empty?) 'at-base-is-empty
+       (values 0 (check-empty-base-branch branch))]
+      [(0 checkcommit) 'find-check-commit
+       (if base-is-empty?
+	   (values 0 "0000000000000000000000000000000000000000")
+	   (run/status+car-strings
+	    (git log -n 1 "--format=%H" ,branch "--")))]
+      [('ok-to-go) 'check-ff-able
+       (if base-is-empty?
+	   'ok-to-go
+	   (if (equal?
+		0 (run (git merge-base --is-ancestor ,checkcommit ,ref)))
+	       'ok-to-go
+	       'not-ok-to-go))])
+     (run (git update-ref ,(format "refs/heads/~a" branch) ,ref ,checkcommit))
+     (else (lambda (t)
+	     (eprintf "Error at ~a\n" t))))))
+
+(define (test-wscfg-assrt field value)
+  (let-values ([(ws-name base-branch related-to change-id last-upload not-submitted) (get-ws-config)])
+    (let ((compare
+	   (match field
+	     ['not-submitted not-submitted])))
+      (if (equal? compare value)
+	  (exit 0)
+	  (begin
+	    (eprintf "~a: get: ~a, expect: ~a\n" field compare value)
+	    (exit 1))))))
+
+(define (test-status-assrt field value)
+  (let-values
+      ([(ws-name need-upload
+		 rebase-suggestion
+		 rebase-from related-to
+		 changeid
+		 base-branch start-ref)
+	(get-status)])
+    (let ((compare
+	   (match field
+	     ['related-to related-to]
+	     ['rebase-suggestion rebase-suggestion]
+	     ['rebase-from rebase-from])))
+      (if (equal? compare value)
+	  (exit 0)
+	  (begin
+	    (eprintf "~a: get: ~a, expect: ~a\n" field compare value)
+	    (exit 1))))))
+
+(define (test-self wd)
+  (let ((srv-repo (path->string (build-path wd "srv")))
+	(srv-url  (format "file://~a" (path->string (build-path wd "srv"))))
+	(test-dir (path->string (build-path wd "dir")))
+	(ws1 "ws1")
+	(ws2 "ws2")
+	(ws1-path (path->string (build-path wd "dir" "ws1")))
+	(ws2-path (path->string (build-path wd "dir" "ws2")))
+	(me-cmd (path->string (path->complete-path
+			       (find-system-path 'exec-file)))))
+    (and-let*-tag-values-check
+     ([(0) 'init-dirs
+       (run (mkdir -p ,srv-repo ,test-dir))]
+      [(0) 'display
+       (begin
+	 (eprintf "ME-CMD is: ~a\n" me-cmd)
+	 0)]
+      [(0) 'init-srv-repo
+       (with-cwd srv-repo
+		 (run (,me-cmd eval "(init-a-gerrit)")))]
+      [(0) 'init-gerrit-repo
+       (with-cwd test-dir
+		 (run (,me-cmd init ,srv-url ,test-dir)))]
+      [(0) 'start-a-workspace
+       (with-cwd test-dir
+		 (run (,me-cmd workspace-start ,ws1 )))]
+      [(0) 'make-a-new-file
+       (with-cwd
+	ws1-path
+	(run (tee w1) (<< "w1 file\n")))]
+      [(0) 'git-add
+       (with-cwd
+	ws1-path
+	(run (git add w1)))]
+      [(0) 'git-commit
+       (with-cwd
+	ws1-path
+	(run (git commit -m "w1 added")))]
+      [(0) 'gerrit-upload
+       (with-cwd
+	ws1-path
+	(run (,me-cmd upload -m "w1 added and upload")))]
+      [(0) 'start-ws2
+       (with-cwd
+	test-dir
+	(run (,me-cmd workspace-start -r 1001 ,ws2)))]
+      [(0) 'check-ws2-relate
+       (with-cwd
+	ws2-path
+	(run (,me-cmd eval "(test-status-assrt 'related-to \"1001\")")))]
+      [(0) 'make-a-new-file-2
+       (with-cwd
+	ws1-path
+	(run (tee w2) (<< "w1 file\n")))]
+      [(0) 'git-add-2
+       (with-cwd
+	ws1-path
+	(run (git add w2)))]
+      [(0) 'git-commit-2
+       (with-cwd
+	ws1-path
+	(run (git commit -m "w2 added")))]
+      [(0) 'gerrit-upload-2
+       (with-cwd
+	ws1-path
+	(run (,me-cmd upload -m "w1 added and upload")))]
+      [(0) 'ws2-update-2
+       (with-cwd
+	ws2-path
+	(run (,me-cmd sync)))]
+      [(0) 'check-ws2-rebase-to
+       (with-cwd
+	ws2-path
+	(run (,me-cmd eval "(test-status-assrt 'rebase-suggestion \"refs/changes/01/1001/2\")")))]
+      [(0) 'check-ws2-rebase-from
+       (with-cwd
+	ws2-path
+	(run (,me-cmd eval "(test-status-assrt 'rebase-from \"refs/changes/01/1001/1\")")))]
+      [(0) 'submit-change
+       (with-cwd
+	srv-repo
+	(run (,me-cmd eval "(submit-a-change 1001 \"main\")")))]
+      [(0) 'update
+       (with-cwd
+	test-dir
+	(run (,me-cmd sync)))]
+      [(0) 'check-ws1-submitted
+       (with-cwd
+	ws1-path
+	(run (,me-cmd eval "(test-wscfg-assrt 'not-submitted #f)")))]
+      [(0) 'check-ws2-relate-to
+       (with-cwd
+	ws2-path
+	(run (,me-cmd eval "(test-status-assrt 'related-to \"0\")")))]
+      [(0) 'ws2-update-2
+       (with-cwd
+	ws2-path
+	(run (,me-cmd sync)))]
+      [(0) 'check-ws2-rebase-to-main
+       (with-cwd
+	ws2-path
+	(run (,me-cmd eval "(test-status-assrt 'rebase-suggestion \"main\")")))]
+      [(0) 'check-ws2-rebase-from-after-base-submit
+       (with-cwd
+	ws2-path
+	(run (,me-cmd eval "(test-status-assrt 'rebase-from \"refs/changes/01/1001/1\")")))])
+     (eprintf "Test passed.\n")
+     (exit 0)
+     (else (lambda (t)
+	     (eprintf "Failed at ~a\n" t)
+	     (exit 1))))))
 
 (module+ main
   (define (main)

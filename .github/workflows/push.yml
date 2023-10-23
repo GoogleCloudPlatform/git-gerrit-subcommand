@@ -37,3 +37,6 @@ jobs:
         echo "$S_VERSION" > version.inc
         bash build-all.sh
         ./git-gerrit.x86_64-linux version
+        git config --global user.email "me@example.com"
+        git config --global user.name "Me Name"
+        ./git-gerrit.x86_64-linux eval '(test-self "/tmp/tg2")'
