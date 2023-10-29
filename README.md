@@ -31,13 +31,22 @@ This workflow allows you to preserve local history, so the developer may consult
 
 The purpose of creating this tool is to provide an extension to the `git` command and change the workflow of using gerrit to be like this:
 
-    1. git checkout main
-    2. git gerrit start-work
+    1. git init gerrit-url .
+    2. git gerrit workspace-start
     3. do_some_edits
     4. git commit
     5. do_more_edit3
     6. git commit
-    7. git gerrit submit
+    7. git gerrit upload
+
+## Features
+
+- [DONE] Workspace create/delete/sync
+- [DONE] Upload Change
+- [DONE] Rebase workspace to HEAD or newest patchset of related-change
+- [TODO] Sparse checkout when creating workspace
+- [TODO] Integrate with VSCode
+- [TODO] A fuse filesystem to do lazy checkouts to save time
 
 ## Basic Usage
 

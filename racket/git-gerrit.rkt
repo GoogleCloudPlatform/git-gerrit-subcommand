@@ -84,6 +84,9 @@
 			(current-error-port))
 	       (values 1 #f)))))))
 
+(struct gerrit-ws-config
+  (ws-name base-branch related-to change-id last-upload not-submitted) #:transparent)
+
 (define (get-ws-config)
   (and-let*-tag-values-check
    ([(0 ws-name) 'gerrit-ws-name
@@ -130,7 +133,7 @@
      (begin
        (when (equal? github? "true")
 	 (gerrit-remote-is-github #t))
-       (values ws-name base-branch related-to change-id last-upload not-submitted)))
+       (gerrit-ws-config ws-name base-branch related-to change-id last-upload not-submitted)))
    (else
     (lambda (t)
       (let ([reason
@@ -142,8 +145,14 @@
 		 (current-error-port)))
       (exit 1)))))
 
-(define (get-status)
-  (let-values ([(ws-name base-branch related-to change-id last-upload not-submitted) (get-ws-config)])
+(define (get-status cfg)
+  (let-values ([(ws-name base-branch related-to change-id last-upload not-submitted)
+		(values (gerrit-ws-config-ws-name cfg)
+			(gerrit-ws-config-base-branch cfg)
+			(gerrit-ws-config-related-to cfg)
+			(gerrit-ws-config-change-id cfg)
+			(gerrit-ws-config-last-upload cfg)
+			(gerrit-ws-config-not-submitted cfg))])
     (and-let*-tag-values-check
      ([(0) 'submitted
        (if not-submitted 0 1)]
@@ -330,23 +339,28 @@
   (call/top-level
    ws (top-level)
    (lambda ()
-     (let go-with-message-commit ((message-commit #f))
-       (let-values
-	   ([(ws-name need-upload
-		      rebase-suggestion
-		      rebase-from related-to
-		      changeid
-		      base-branch start-ref)
-	     (get-status)])
-	(if (not message-commit)
-	    (let-values ([(status out)
-			  (run/status+strings
-			   (git log -n 1 "--format=%H" --grep ,(format "^Change-Id: ~a$" changeid)))])
-	      (if (and (eq? status 0) (pair? out))
-		  (go-with-message-commit (car out))
-		  (begin (get-a-new-message-commit start-ref changeid change-message signoff)
-			 (go-with-message-commit #f))))
-	    (squash-and-upload ws-name changeid message-commit start-ref base-branch need-upload)))))))
+     (let ((cfg (get-ws-config)))
+       (if (not (gerrit-ws-config-not-submitted cfg))
+	   (begin
+	     (eprintf "Workspace \"~a\" has already been submitted. No upload will be done.\n")
+	     1)
+	   (let go-with-message-commit ((message-commit #f))
+	     (let-values
+		 ([(ws-name need-upload
+			    rebase-suggestion
+			    rebase-from related-to
+			    changeid
+			    base-branch start-ref)
+		   (get-status cfg)])
+	       (if (not message-commit)
+		   (let-values ([(status out)
+				 (run/status+strings
+				  (git log -n 1 "--format=%H" --grep ,(format "^Change-Id: ~a$" changeid)))])
+		     (if (and (eq? status 0) (pair? out))
+			 (go-with-message-commit (car out))
+			 (begin (get-a-new-message-commit start-ref changeid change-message signoff)
+				(go-with-message-commit #f))))
+		   (squash-and-upload ws-name changeid message-commit start-ref base-branch need-upload)))))))))
 
 (define (find-merge-point ws base-branch related-to)
   (if (equal? related-to "0")
@@ -575,25 +589,95 @@
       (values 0 `(--orphan ,name))
       (values 0 `(--no-track ,name ,branch))))
 
-(define (print-status ws)
+(define (output-status-json)
+  (let ((cfg (get-ws-config)))
+    (if (gerrit-ws-config-not-submitted cfg)
+	(let-values ([(ws-name need-upload rebase-suggestion rebase-from related-to change-id base-branch fork-point)
+			 (get-status cfg)])
+	  (let*-values ([(status commits)
+			 (run/status+strings
+			  (git log -n 1 "--format=%H"
+			       --color=never
+			       --grep ,(format "Change-Id: ~a"
+					       change-id)))]
+			[(message-commit)
+			 (if (and (eq? status 0)
+				  (pair? commits))
+			     (values (car commits))
+			     (values #f))])
+	   (printf "{
+\"not-submitted\": ~a,
+\"ws-name\": \"~a\",
+\"message-commit\": \"~a\",
+\"need-upload\": ~a,
+\"rebase-suggestion\": \"~a\",
+\"rebase-from\": \"~a\",
+\"related-to\": \"~a\",
+\"change-id\": \"~a\",
+\"base-branch\": \"~a\",
+\"fork-point\": \"~a\"
+}\n" "true" ws-name (if message-commit message-commit "") (if need-upload "true" "false") rebase-suggestion rebase-from related-to change-id base-branch fork-point)))
+	(printf "{\"not-submitted\": false}"))))
+
+(define (output-status-sexp)
+  (let ((cfg (get-ws-config)))
+    (if (gerrit-ws-config-not-submitted cfg)
+	(let-values
+	    ([(ws-name need-upload rebase-suggestion rebase-from related-to change-id base-branch fork-point)
+	      (get-status cfg)])
+	  (let*-values ([(status commits)
+			 (run/status+strings
+			  (git log -n 1 "--format=%H"
+			       --color=never
+			       --grep ,(format "Change-Id: ~a"
+					       change-id)))]
+			[(message-commit)
+			 (if (and (eq? status 0)
+				  (pair? commits))
+			     (values (car commits))
+			     (values #f))])
+	      (pretty-print
+	       `((not-submitted     . #t)
+		 (ws-name           . ,ws-name)
+		 (message-commit    . ,message-commit)
+		 (need-upload       . ,need-upload)
+		 (rebase-suggestion . ,rebase-suggestion) 
+		 (rebase-from	     . ,rebase-from)       
+		 (related-to	     . ,related-to)        
+		 (change-id	     . ,change-id)
+		 (base-branch	     . ,base-branch)       
+		 (fork-point        . ,fork-point)))))
+	(pretty-print
+	 '((not-submitted . #f))))))
+
+(define (print-status ws o-format)
   (call/top-level
    ws (top-level)
    (lambda ()
-     (let-values ([(ws-name need-upload rebase-suggestion rebase-from related-to change-id base-branch fork-point)
-		   (get-status)])
-       (display (format "Workspace \"~a\" targetting \"~a\",\n" ws-name base-branch))
-       (unless (equal? related-to "0")
-	 (display (format "  Related to Change: ~a,\n" related-to)))
-       (display (format "Change-Message for Change-Id ~a:\n" change-id))
-       (run (git log -n 1 "--format=medium" --color=never --grep ,(format "Change-Id: ~a" change-id)))
-       (display ".\n")
-       (when rebase-suggestion
-	 (display (format "Upstream updated: can rebase to ~a from ~a,\n" rebase-suggestion rebase-from)))
-       (display (if need-upload
-		    "Has new work to upload, run `git gerrit upload`.\n"
-		    "Workspace is clean, no upload needed.\n"))
+     (match o-format
+       ('json (begin (output-status-json) 0))
+       ('sexp (begin (output-status-sexp) 0))
+       (_
+	(let ((cfg (get-ws-config)))
+	  (if (not (gerrit-ws-config-not-submitted cfg))
+	      (begin
+		(printf "Workspace \"~a\" has been submitted.\n" ws)
+		0)
+	      (let-values ([(ws-name need-upload rebase-suggestion rebase-from related-to change-id base-branch fork-point)
+			    (get-status cfg)])
+		(display (format "Workspace \"~a\" targetting \"~a\",\n" ws-name base-branch))
+		(unless (equal? related-to "0")
+		  (display (format "  Related to Change: ~a,\n" related-to)))
+		(display (format "Change-Message for Change-Id ~a:\n" change-id))
+		(run (git log -n 1 "--format=medium" --color=never --grep ,(format "Change-Id: ~a" change-id)))
+		(display ".\n")
+		(when rebase-suggestion
+		  (display (format "Upstream updated: can rebase to ~a from ~a,\n" rebase-suggestion rebase-from)))
+		(display (if need-upload
+			     "Has new work to upload, run `git gerrit upload`.\n"
+			     "Workspace is clean, no upload needed.\n"))
 
-       0))))
+		0))))))))
 
 (define (repo-url->dir repo-url)
   (match (regexp-match #rx"^.*?([^:/]*?)(/?.git)?$" repo-url)
@@ -682,7 +766,7 @@
 	   (build-path tpl "..")
 	   (abs-sync-repo))
 	  (if (not no-status)
-	      (print-status #f)
+	      (print-status #f 'txt)
 	      0))
 	(if (directory-exists? (gerrit-dir))
 	    (abs-sync-repo)
@@ -715,21 +799,26 @@
   (call/top-level
    ws (top-level)
    (lambda ()
-     (let-values ([(ws-name need-upload
-		      rebase-suggestion
-		      rebase-from related-to
-		      changeid
-		      base-branch start-ref)
-		   (get-status)])
-       (if rebase-suggestion
+     (let ((cfg (get-ws-config)))
+       (if (not (gerrit-ws-config-not-submitted cfg))
 	   (begin
-	     (run (git rebase --onto ,rebase-suggestion ,rebase-from))
-	     (when (equal? rebase-suggestion base-branch)
-	       (run (git config --add ,(gerrit-config-name ,ws-name related-to) "0"))))
-	   (begin
-	     (display "No rebase needed.\n"
-		      (current-error-port))
-	     1))))))
+	     (eprintf "Workspace \"~a\" has been submitted. No rebase will be done.\n" ws)
+	     1)
+	   (let-values ([(ws-name need-upload
+				  rebase-suggestion
+				  rebase-from related-to
+				  changeid
+				  base-branch start-ref)
+			 (get-status cfg)])
+	     (if rebase-suggestion
+		 (begin
+		   (run (git rebase --onto ,rebase-suggestion ,rebase-from))
+		   (when (equal? rebase-suggestion base-branch)
+		     (run (git config --add ,(gerrit-config-name ,ws-name related-to) "0"))))
+		 (begin
+		   (display "No rebase needed.\n"
+			    (current-error-port))
+		   1))))))))
 
 (define (changeid->changenum change-id)
   (let ([lines
@@ -752,11 +841,10 @@
 		(call/top-level
 		 ws (top-level)
 		 (lambda ()
-		   (let-values ([(ws-name base-branch
-					  related-to changeid
-					  last-upload not-submitted)
-				 (get-ws-config)])
-		     (values ws-name not-submitted))))])
+		   (let ([cfg
+			  (get-ws-config)])
+		     (values (gerrit-ws-config-ws-name cfg)
+			     (gerrit-ws-config-not-submitted cfg)))))])
     (if (or force? (not nots))
 	(and-let*-tag-values-check
 	 ([(0) 'remove-worktree
@@ -897,14 +985,21 @@
   (let*
       ([cmd-name "status"]
        [cmd (lambda (args)
-	      (let ((ws (command-line
-			 #:program (format "git-gerrit ~a" cmd-name)
-			 #:argv args
-			 #:args ws
-			 (if (pair? ws)
-			     (car ws)
-			     #f))))
-		(exit (print-status ws))))])
+	      (let*
+		  ((o-format (make-parameter 'txt))
+		   (ws (command-line
+			#:program (format "git-gerrit ~a" cmd-name)
+			#:argv args
+			#:once-any
+			["--json" "Report status using json format."
+			 (o-format 'json)]
+			["--sexp" "Report status using sexp."
+			 (o-format 'sexp)]
+			#:args ws
+			(if (pair? ws)
+			    (car ws)
+			    #f))))
+		(exit (print-status ws (o-format)))))])
     (hash-set! sub-commands cmd-name cmd)
     cmd))
 
@@ -927,7 +1022,7 @@
 			    (car workspace)
 			    #f))))
 		  (if (dry-run)
-		      (exit (print-status ws))
+		      (exit (print-status ws 'txt))
 		      (exit (workspace-rebase ws))))))])
     (hash-set! sub-commands cmd-name cmd)
     cmd))
@@ -950,9 +1045,10 @@
 		    #:usage-help
 		    "Update commit message for current change.")
 		   (exit
-		    (let-values
-			([(ws-name base-branch related-to changeid last-upload not-submitted)
-			  (get-ws-config)])
+		    (let*
+			([cfg (get-ws-config)]
+			 [base-branch (gerrit-ws-config-base-branch cfg)]
+			 [changeid (gerrit-ws-config-change-id cfg)])
 		      (if (get-a-new-message-commit base-branch changeid (change-message) (signoff))
 			  0
 			  1))))))])
@@ -1132,34 +1228,36 @@
 	     (eprintf "Error at ~a\n" t))))))
 
 (define (test-wscfg-assrt field value)
-  (let-values ([(ws-name base-branch related-to change-id last-upload not-submitted) (get-ws-config)])
-    (let ((compare
-	   (match field
-	     ['not-submitted not-submitted])))
-      (if (equal? compare value)
-	  (exit 0)
-	  (begin
-	    (eprintf "~a: get: ~a, expect: ~a\n" field compare value)
-	    (exit 1))))))
+  (match (get-ws-config)
+    [(gerrit-ws-config ws-name base-branch related-to change-id last-upload not-submitted)
+     (let ((compare
+	    (match field
+	      ['not-submitted not-submitted])))
+       (if (equal? compare value)
+	   (exit 0)
+	   (begin
+	     (eprintf "~a: get: ~a, expect: ~a\n" field compare value)
+	     (exit 1))))]))
 
 (define (test-status-assrt field value)
-  (let-values
-      ([(ws-name need-upload
-		 rebase-suggestion
-		 rebase-from related-to
-		 changeid
-		 base-branch start-ref)
-	(get-status)])
-    (let ((compare
-	   (match field
-	     ['related-to related-to]
-	     ['rebase-suggestion rebase-suggestion]
-	     ['rebase-from rebase-from])))
-      (if (equal? compare value)
-	  (exit 0)
-	  (begin
-	    (eprintf "~a: get: ~a, expect: ~a\n" field compare value)
-	    (exit 1))))))
+  (let ((cfg (get-ws-config)))
+   (let-values
+       ([(ws-name need-upload
+		  rebase-suggestion
+		  rebase-from related-to
+		  changeid
+		  base-branch start-ref)
+	 (get-status cfg)])
+     (let ((compare
+	    (match field
+	      ['related-to related-to]
+	      ['rebase-suggestion rebase-suggestion]
+	      ['rebase-from rebase-from])))
+       (if (equal? compare value)
+	   (exit 0)
+	   (begin
+	     (eprintf "~a: get: ~a, expect: ~a\n" field compare value)
+	     (exit 1)))))))
 
 (define (test-self wd)
   (let ((srv-repo (path->string (build-path wd "srv")))
